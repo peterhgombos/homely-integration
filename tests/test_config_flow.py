@@ -784,3 +784,75 @@ def test_config_flow_does_not_expose_options_flow():
 def test_config_flow_does_not_expose_reconfigure_step():
     """Location changes should not be supported through reconfigure."""
     assert not hasattr(HomelyConfigFlow, "async_step_reconfigure")
+
+
+async def test_user_flow_error_does_not_echo_password_back_into_form(hass):
+    """A rejected login must not pre-fill the password field with the attempt."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+
+    with patch(
+        "custom_components.homely.config_flow.fetch_token_with_reason",
+        AsyncMock(return_value=(None, "invalid_auth")),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USERNAME: USERNAME,
+                CONF_PASSWORD: PASSWORD,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    defaults = {
+        str(key): key.default() for key in result["data_schema"].schema
+    }
+    assert defaults[CONF_USERNAME] == USERNAME
+    assert defaults[CONF_PASSWORD] == ""
+
+
+async def test_reauth_resolves_legacy_home_id_entry(
+    hass,
+    token_response,
+    location_response,
+):
+    """Legacy entries without location_id resolve it from home_id during reauth."""
+    entry = build_config_entry(
+        data_overrides={CONF_LOCATION_ID: None, CONF_HOME_ID: 1},
+        unique_id=None,
+    )
+    entry.add_to_hass(hass)
+    new_data = {key: value for key, value in entry.data.items() if value is not None}
+    hass.config_entries.async_update_entry(entry, data=new_data)
+    assert CONF_LOCATION_ID not in entry.data
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id},
+        data=entry.data,
+    )
+
+    with (
+        patch(
+            "custom_components.homely.config_flow.fetch_token_with_reason",
+            AsyncMock(return_value=(token_response, None)),
+        ),
+        patch(
+            "custom_components.homely.config_flow.get_location_id",
+            AsyncMock(return_value=location_response),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_USERNAME: "new@example.com",
+                CONF_PASSWORD: "new-secret",
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_PASSWORD] == "new-secret"
+    assert entry.data[CONF_LOCATION_ID] == SECOND_LOCATION_ID
