@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.homely.lock import (

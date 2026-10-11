@@ -14,7 +14,11 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.homely.alarm_control_panel import (
     PARALLEL_UPDATES as ALARM_PARALLEL_UPDATES,
+)
+from custom_components.homely.alarm_control_panel import (
     HomelyAlarmPanel,
+)
+from custom_components.homely.alarm_control_panel import (
     async_setup_entry as alarm_async_setup_entry,
 )
 from custom_components.homely.all_batteries_healthy import (
@@ -23,10 +27,14 @@ from custom_components.homely.all_batteries_healthy import (
 )
 from custom_components.homely.lock import (
     PARALLEL_UPDATES as LOCK_PARALLEL_UPDATES,
+)
+from custom_components.homely.lock import (
     HomelyLock,
-    async_setup_entry as lock_async_setup_entry,
     _coerce_bool,
     _is_lock_device,
+)
+from custom_components.homely.lock import (
+    async_setup_entry as lock_async_setup_entry,
 )
 from custom_components.homely.models import HomelyRuntimeData
 from custom_components.homely.sensor import (

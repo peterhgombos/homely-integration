@@ -15,7 +15,9 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
+from .all_batteries_healthy import HomelyAllBatteriesHealthySensor
 from .const import DOMAIN
+from .device_state import get_current_device, is_device_available
 from .models import HomelyConfigEntry, get_entry_runtime_data
 from .naming import (
     build_suggested_object_id,
@@ -23,9 +25,7 @@ from .naming import (
     get_device_display_name,
     humanize_label,
 )
-from .all_batteries_healthy import HomelyAllBatteriesHealthySensor
-from .device_state import get_current_device, is_device_available
-from .sensors.discover import discover_device_sensors, _get_value_by_path
+from .sensors.discover import _get_value_by_path, discover_device_sensors
 
 PARALLEL_UPDATES = 0
 SensorConfig = dict[str, Any]

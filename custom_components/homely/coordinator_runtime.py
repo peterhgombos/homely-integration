@@ -472,8 +472,8 @@ def build_async_update_data(
                 raise UpdateFailed("Full login response missing required fields")
             try:
                 new_expires_in_seconds = int(new_expires_in)
-            except (TypeError, ValueError):
-                raise UpdateFailed("Full login response has invalid expires_in")
+            except (TypeError, ValueError) as err:
+                raise UpdateFailed("Full login response has invalid expires_in") from err
 
             runtime_data.access_token = new_access_token
             runtime_data.refresh_token = new_refresh_token
@@ -644,7 +644,7 @@ def build_async_update_data(
                         if recovered_token is None:
                             raise UpdateFailed(
                                 "Fallback full login returned no usable token"
-                            )
+                            ) from None
                         access_token = recovered_token
                     else:
                         runtime_data.access_token = new_access_token

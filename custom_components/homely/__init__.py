@@ -17,15 +17,15 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
 from .api import (
     clear_last_refresh_token_result,
     fetch_refresh_token,
     fetch_token_with_reason,
-    get_last_refresh_token_result,
     get_data_with_status,
+    get_last_refresh_token_result,
     get_location_id,
 )
-from .coordinator_runtime import build_async_update_data, schedule_api_error_retry
 from .const import (
     CONF_HOME_ID,
     CONF_LOCATION_ID,
@@ -37,12 +37,15 @@ from .const import (
     DOMAIN,
     OPTION_KEYS,
 )
+from .coordinator_runtime import build_async_update_data, schedule_api_error_retry
 from .logging_helpers import (
     _ctx,
     _json_debug,
     _log_identifier,
-    _log_startup_device_payloads as _log_startup_device_payloads_impl,
     _redact_for_debug_logging,
+)
+from .logging_helpers import (
+    _log_startup_device_payloads as _log_startup_device_payloads_impl,
 )
 from .models import HomelyConfigEntry, HomelyRuntimeData
 from .repairs import (
@@ -50,10 +53,10 @@ from .repairs import (
     async_sync_missing_devices_issue,
 )
 from .runtime_state import (
-    current_runtime_data,
-    device_id_snapshot,
     LAST_ARMED_CACHE_KEY,
     LAST_DISARMED_CACHE_KEY,
+    current_runtime_data,
+    device_id_snapshot,
     location_payload_error,
     record_api_poll_status,
     record_last_armed,
@@ -847,7 +850,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> b
                         err,
                     )
 
-        setattr(entry, "runtime_data", None)
+        # Typed as HomelyRuntimeData on HomelyConfigEntry; clear via setattr so the
+        # readers that use getattr(entry, "runtime_data", None) see an unloaded entry.
+        setattr(entry, "runtime_data", None)  # noqa: B010
         _LOGGER.debug(
             "Homely Alarm integration unloaded entry_id=%s location_id=%s",
             entry.entry_id,

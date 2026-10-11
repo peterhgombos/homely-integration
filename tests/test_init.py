@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 import logging
 import time
+from collections.abc import Callable
 from contextlib import ExitStack
 from copy import deepcopy
 from datetime import timedelta
@@ -19,15 +19,15 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.homely import api
 from custom_components.homely import (
     _device_id_snapshot,
     _log_startup_device_payloads,
     _pending_import_locations,
     _redact_for_debug_logging,
     _schedule_pending_location_imports,
-    async_reload_entry,
+    api,
     async_migrate_entry,
+    async_reload_entry,
     async_remove_config_entry_device,
     async_setup_entry,
     async_unload_entry,
@@ -51,7 +51,7 @@ from tests.common import LOCATION_ID, SECOND_LOCATION_ID, build_config_entry
 class _FakeHomelyWebSocket:
     """Minimal websocket stub for integration setup tests."""
 
-    instances: list["_FakeHomelyWebSocket"] = []
+    instances: list[_FakeHomelyWebSocket] = []
     connect_result = True
     connect_error: Exception | None = None
     initial_status = "Not initialized"
@@ -1977,13 +1977,12 @@ async def test_coordinator_update_method_reload_on_new_device_topology(
         hass.config_entries,
         "async_reload",
         AsyncMock(return_value=True),
-    ) as async_reload:
-        with patch(
-            "custom_components.homely.get_data_with_status",
-            AsyncMock(return_value=(changed_data, 200)),
-        ):
-            result = await runtime_data.coordinator.update_method()
-            await hass.async_block_till_done()
+    ) as async_reload, patch(
+        "custom_components.homely.get_data_with_status",
+        AsyncMock(return_value=(changed_data, 200)),
+    ):
+        result = await runtime_data.coordinator.update_method()
+        await hass.async_block_till_done()
 
     assert result["devices"][-1]["id"] == "new-device-id"
     assert "new-device-id" in runtime_data.tracked_device_ids
@@ -2028,13 +2027,12 @@ async def test_coordinator_update_method_does_not_double_schedule_topology_reloa
         hass.config_entries,
         "async_reload",
         AsyncMock(return_value=True),
-    ) as async_reload:
-        with patch(
-            "custom_components.homely.get_data_with_status",
-            AsyncMock(return_value=(changed_data, 200)),
-        ):
-            await runtime_data.coordinator.update_method()
-            await hass.async_block_till_done()
+    ) as async_reload, patch(
+        "custom_components.homely.get_data_with_status",
+        AsyncMock(return_value=(changed_data, 200)),
+    ):
+        await runtime_data.coordinator.update_method()
+        await hass.async_block_till_done()
 
     assert "new-device-id" in runtime_data.tracked_device_ids
     async_reload.assert_not_awaited()
@@ -2326,18 +2324,17 @@ async def test_coordinator_update_method_refresh_fallback_non_auth_failure_uses_
     )
     runtime_data.last_data_activity_monotonic = time.monotonic() - 7200
 
-    with caplog.at_level(logging.DEBUG):
-        with (
-            patch(
-                "custom_components.homely.fetch_refresh_token",
-                AsyncMock(return_value=None),
-            ),
-            patch(
-                "custom_components.homely.fetch_token_with_reason",
-                AsyncMock(return_value=(None, "cannot_connect")),
-            ),
-        ):
-            result = await runtime_data.coordinator.update_method()
+    with (
+        caplog.at_level(logging.DEBUG), patch(
+            "custom_components.homely.fetch_refresh_token",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "custom_components.homely.fetch_token_with_reason",
+            AsyncMock(return_value=(None, "cannot_connect")),
+        ),
+    ):
+        result = await runtime_data.coordinator.update_method()
 
     assert result == runtime_data.last_data
     assert runtime_data.api_available is False
@@ -2371,12 +2368,11 @@ async def test_coordinator_update_method_refresh_exception_uses_cache(
     runtime_data = config_entry.runtime_data
     runtime_data.expires_at = 0
 
-    with caplog.at_level(logging.DEBUG):
-        with patch(
-            "custom_components.homely.fetch_refresh_token",
-            AsyncMock(side_effect=RuntimeError("network down")),
-        ):
-            result = await runtime_data.coordinator.update_method()
+    with caplog.at_level(logging.DEBUG), patch(
+        "custom_components.homely.fetch_refresh_token",
+        AsyncMock(side_effect=RuntimeError("network down")),
+    ):
+        result = await runtime_data.coordinator.update_method()
 
     assert result == runtime_data.last_data
     assert runtime_data.api_available is False
@@ -2578,24 +2574,23 @@ async def test_coordinator_update_method_refresh_response_invalid_expires_uses_c
         update_token=MagicMock(),
     )
 
-    with caplog.at_level(logging.WARNING):
-        with (
-            patch(
-                "custom_components.homely.fetch_refresh_token",
-                AsyncMock(
-                    return_value={
-                        "access_token": "new-access-token",
-                        "refresh_token": "new-refresh-token",
-                        "expires_in": "bad",
-                    }
-                ),
+    with (
+        caplog.at_level(logging.WARNING), patch(
+            "custom_components.homely.fetch_refresh_token",
+            AsyncMock(
+                return_value={
+                    "access_token": "new-access-token",
+                    "refresh_token": "new-refresh-token",
+                    "expires_in": "bad",
+                }
             ),
-            patch(
-                "custom_components.homely.fetch_token_with_reason",
-                AsyncMock(return_value=(None, "cannot_connect")),
-            ),
-        ):
-            result = await runtime_data.coordinator.update_method()
+        ),
+        patch(
+            "custom_components.homely.fetch_token_with_reason",
+            AsyncMock(return_value=(None, "cannot_connect")),
+        ),
+    ):
+        result = await runtime_data.coordinator.update_method()
 
     assert result == runtime_data.last_data
     assert runtime_data.api_available is False
@@ -2641,22 +2636,21 @@ async def test_coordinator_update_method_logs_refresh_failure_detail_and_body_pr
         body_preview="{'access_token': 'token'}",
     )
 
-    with caplog.at_level(logging.WARNING):
-        with (
-            patch(
-                "custom_components.homely.fetch_refresh_token",
-                AsyncMock(return_value=None),
-            ),
-            patch(
-                "custom_components.homely.get_last_refresh_token_result",
-                return_value=refresh_snapshot,
-            ),
-            patch(
-                "custom_components.homely.fetch_token_with_reason",
-                AsyncMock(return_value=(None, "cannot_connect")),
-            ),
-        ):
-            result = await runtime_data.coordinator.update_method()
+    with (
+        caplog.at_level(logging.WARNING), patch(
+            "custom_components.homely.fetch_refresh_token",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "custom_components.homely.get_last_refresh_token_result",
+            return_value=refresh_snapshot,
+        ),
+        patch(
+            "custom_components.homely.fetch_token_with_reason",
+            AsyncMock(return_value=(None, "cannot_connect")),
+        ),
+    ):
+        result = await runtime_data.coordinator.update_method()
 
     assert result == runtime_data.last_data
     joined = "\n".join(record.getMessage() for record in caplog.records)
@@ -3857,13 +3851,12 @@ async def test_coordinator_update_method_reloads_when_devices_appear_after_empty
         hass.config_entries,
         "async_reload",
         AsyncMock(return_value=True),
-    ) as async_reload:
-        with patch(
-            "custom_components.homely.get_data_with_status",
-            AsyncMock(return_value=(updated_location_data, 200)),
-        ):
-            await runtime_data.coordinator.update_method()
-            await hass.async_block_till_done()
+    ) as async_reload, patch(
+        "custom_components.homely.get_data_with_status",
+        AsyncMock(return_value=(updated_location_data, 200)),
+    ):
+        await runtime_data.coordinator.update_method()
+        await hass.async_block_till_done()
 
     async_reload.assert_awaited_once_with(config_entry.entry_id)
     assert runtime_data.tracked_device_ids

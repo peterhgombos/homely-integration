@@ -8,12 +8,11 @@ from unittest.mock import AsyncMock, patch
 from homeassistant import config_entries
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
-
 from homely import HomelyClient
 
 from custom_components.homely.config_flow import (
-    HomelyConfigFlow,
     LOCATION_SELECTION_ALL,
+    HomelyConfigFlow,
     _coerce_scan_interval,
     _entry_home_id,
     _fetch_locations_for_credentials,
@@ -29,8 +28,8 @@ from custom_components.homely.config_flow import (
 from custom_components.homely.const import (
     CONF_HOME_ID,
     CONF_LOCATION_ID,
-    CONF_PENDING_IMPORT_LOCATIONS,
     CONF_PASSWORD,
+    CONF_PENDING_IMPORT_LOCATIONS,
     CONF_USERNAME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,

@@ -28,8 +28,8 @@ from .naming import (
 from .runtime_state import (
     websocket_connection_state,
 )
+from .sensors.discover import _get_value_by_path, discover_device_sensors
 from .websocket import WEBSOCKET_STATUS_OPTIONS as SDK_WEBSOCKET_STATUS_OPTIONS
-from .sensors.discover import discover_device_sensors, _get_value_by_path
 
 PARALLEL_UPDATES = 0
 SensorConfig = dict[str, Any]

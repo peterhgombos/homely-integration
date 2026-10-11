@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant
@@ -15,15 +14,16 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homely.client import HomelyClient
 
 from .const import (
-    CONF_PENDING_IMPORT_LOCATIONS,
     CONF_HOME_ID,
     CONF_LOCATION_ID,
     CONF_PASSWORD,
+    CONF_PENDING_IMPORT_LOCATIONS,
     CONF_USERNAME,
     DEFAULT_HOME_ID,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
+
 _LOGGER = logging.getLogger(__name__)
 LOCATION_SELECTION_ALL = "__all_locations__"
 

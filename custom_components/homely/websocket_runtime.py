@@ -376,11 +376,10 @@ def build_websocket_data_handler(
                 coordinator.async_update_listeners()
 
         except Exception as err:
-            logger.error(
+            logger.exception(
                 "Unhandled exception in websocket callback %s: %s. Please open a GitHub issue if this keeps happening.",
                 ctx(entry.entry_id, location_id),
                 err,
-                exc_info=True,
             )
 
     return on_websocket_data
