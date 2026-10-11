@@ -488,3 +488,61 @@ def test_han_sensor_scales_totals_and_exposes_power(location_data):
 
     assert consumption_entity.native_value == 769.67
     assert demand_entity.native_value == 105
+
+
+def test_alarm_panel_maps_entry_delay_states_to_pending(location_data):
+    """Entry-delay states (sensor tripped while armed) map to HA's pending state."""
+    coordinator = MagicMock()
+    coordinator.data = location_data
+    entity = HomelyAlarmPanel(coordinator, LOCATION_ID)
+
+    coordinator.data["alarmState"] = "ALARM_PENDING"
+    assert entity.alarm_state is AlarmControlPanelState.PENDING
+
+    coordinator.data["alarmState"] = "ALARM_STAY_PENDING"
+    assert entity.alarm_state is AlarmControlPanelState.PENDING
+
+    # Exit delay (system arming) stays "arming".
+    coordinator.data["alarmState"] = "ARMED_NIGHT_PENDING"
+    assert entity.alarm_state is AlarmControlPanelState.ARMING
+
+
+async def test_alarm_panel_commands_raise_homeassistant_error(location_data):
+    """Arm/disarm are unsupported and must fail with a user-facing error."""
+    coordinator = MagicMock()
+    coordinator.data = location_data
+    entity = HomelyAlarmPanel(coordinator, LOCATION_ID)
+
+    for command in (
+        entity.async_alarm_disarm,
+        entity.async_alarm_arm_home,
+        entity.async_alarm_arm_away,
+        entity.async_alarm_arm_night,
+    ):
+        try:
+            await command()
+        except HomeAssistantError:
+            continue
+        raise AssertionError(f"{command.__name__} did not raise HomeAssistantError")
+
+
+def test_device_info_links_devices_to_the_homely_home(location_data):
+    """Physical devices reference the virtual home device and expose model_id."""
+    coordinator = MagicMock()
+    coordinator.data = location_data
+    device = deepcopy(location_data["devices"][0])
+    device["modelId"] = "model-123"
+    sensor_config = next(
+        config
+        for config in discover_device_sensors(device)
+        if config["type"] == "sensor" and config["device_suffix"] == "temperature"
+    )
+
+    entity = HomelySensor(coordinator, device, sensor_config, location_id=LOCATION_ID)
+    assert entity.device_info is not None
+    assert entity.device_info["via_device"] == ("homely", f"location_{LOCATION_ID}")
+    assert entity.device_info["model_id"] == "model-123"
+
+    standalone = HomelySensor(coordinator, device, sensor_config)
+    assert standalone.device_info is not None
+    assert "via_device" not in standalone.device_info
