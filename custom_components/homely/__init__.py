@@ -14,7 +14,7 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.device_registry import DeviceEntry, DeviceEntryType
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -48,6 +48,7 @@ from .logging_helpers import (
     _log_startup_device_payloads as _log_startup_device_payloads_impl,
 )
 from .models import HomelyConfigEntry, HomelyRuntimeData
+from .naming import location_device_identifier
 from .repairs import (
     async_delete_missing_devices_issue,
     async_sync_missing_devices_issue,
@@ -79,6 +80,9 @@ PLATFORMS = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.LOCK,
 ]
+# Websocket events are coalesced into one cache write per window so a chatty
+# device (HAN meter) cannot postpone the write forever or wear out flash.
+STORE_SAVE_DELAY_SECONDS = 60
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -420,7 +424,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
             data = None
     seed_without_poll = False
     save_initial_data = False
-    initial_pending_removed_ids: set[str] = set()
     if initial_fetch_deferred:
         assert data is not None
         seed_without_poll = True
@@ -429,61 +432,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
             _set_alarm_state(data, initial_alarm_state)
         _log_startup_device_payloads(data, entry_id, location_id)
     elif not data:
-        # The initial /home poll returned no usable data. This happens when
-        # Homely rate limits us, or when the REST API is temporarily broken
-        # while the websocket still works. Degrade gracefully instead of
-        # refusing to load: prefer a cached snapshot, otherwise still load
-        # when the websocket can carry live alarm state.
-        if stored_data:
-            _LOGGER.warning(
-                "Initial Homely API poll failed (status=%s); using stored data "
-                "from previous run entry_id=%s location_id=%s",
-                initial_fetch_status,
-                entry_id,
-                location_id,
-            )
-            data = stored_data
-            seed_without_poll = True
-        elif enable_websocket:
-            _LOGGER.warning(
-                "Initial Homely API poll failed (status=%s) and no stored data is "
-                "available; loading with websocket-only data and relying on the "
-                "websocket for live alarm state. Per-device sensors stay "
-                "unavailable until the API recovers entry_id=%s location_id=%s",
-                initial_fetch_status,
-                entry_id,
-                location_id,
-            )
-            data = {}
-            seed_without_poll = True
-        else:
+        # The initial /home poll returned no usable data and there is no valid
+        # cached snapshot (a cached snapshot takes the deferred path above).
+        # This happens when Homely rate limits us, or when the REST API is
+        # temporarily broken while the websocket still works. Degrade
+        # gracefully instead of refusing to load and rely on the websocket for
+        # live alarm state.
+        if not enable_websocket:
             raise ConfigEntryNotReady("Failed to fetch Homely location data")
+        _LOGGER.warning(
+            "Initial Homely API poll failed (status=%s) and no stored data is "
+            "available; loading with websocket-only data and relying on the "
+            "websocket for live alarm state. Per-device sensors stay "
+            "unavailable until the API recovers entry_id=%s location_id=%s",
+            initial_fetch_status,
+            entry_id,
+            location_id,
+        )
+        data = {}
+        seed_without_poll = True
     else:
         initial_alarm_state = _get_alarm_state(data)
         if initial_alarm_state is not None:
             _set_alarm_state(data, initial_alarm_state)
-
-        if stored_data is not None:
-            initial_pending_removed_ids = _device_id_snapshot(
-                stored_data
-            ) - _device_id_snapshot(data)
-            if initial_pending_removed_ids:
-                stored_devices = stored_data.get("devices")
-                current_devices = data.get("devices")
-                if isinstance(stored_devices, list) and isinstance(
-                    current_devices, list
-                ):
-                    current_devices.extend(
-                        device
-                        for device in stored_devices
-                        if isinstance(device, dict)
-                        and str(device.get("id")) in initial_pending_removed_ids
-                    )
-                _LOGGER.warning(
-                    "Initial Homely API poll omitted cached devices; waiting for a second snapshot before removal %s removed_count=%s",
-                    _ctx(entry_id, location_id),
-                    len(initial_pending_removed_ids),
-                )
         _log_startup_device_payloads(data, entry_id, location_id)
         save_initial_data = True
 
@@ -560,12 +531,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
         update_interval=timedelta(seconds=scan_interval),
         config_entry=entry,
     )
-    # Only claim the REST API is reachable when this setup actually got fresh
-    # data from a live poll. When we fell back to stored/empty data (e.g. the
-    # /home endpoint returning HTTP 439), seed False so the "Cloud API
-    # connection" sensor reports the outage immediately instead of defaulting
-    # to "connected" until the first failing poll runs.
-    initial_api_available = bool(data) and not seed_without_poll
+    # Only claim an API outage when this setup actually observed a failed
+    # poll. A cache-seeded start has not talked to the API yet; the background
+    # synchronization decides, instead of logging "reachable again" on every
+    # restart. System Health reports api_available.
+    initial_poll_succeeded = bool(data) and not seed_without_poll
+    initial_api_available = initial_fetch_deferred or initial_poll_succeeded
     runtime_data = HomelyRuntimeData(
         coordinator=coordinator,
         access_token=access_token_str,
@@ -574,15 +545,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
         location_id=normalized_location_id,
         last_data=data,
         tracked_device_ids=_device_id_snapshot(data),
-        pending_removed_device_ids=initial_pending_removed_ids,
-        pending_removal_confirmations=(1 if initial_pending_removed_ids else 0),
         partner_code=partner_code,
         api_available=initial_api_available,
     )
     record_last_armed(runtime_data, data.get(LAST_ARMED_CACHE_KEY))
     record_last_disarmed(runtime_data, data.get(LAST_DISARMED_CACHE_KEY))
     if not initial_fetch_deferred:
-        if initial_api_available:
+        if initial_poll_succeeded:
             # Only claim a successful poll when one actually happened. When seeding
             # from cache the data-activity baseline (set by the dataclass default)
             # keeps the cache-grace logic working, but the poll timestamps stay
@@ -617,13 +586,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
             "homely initial data cache save",
         )
 
+    last_save_scheduled_monotonic = float("-inf")
+
     def _save_on_successful_update() -> None:
         # Delay the write: this listener fires for every websocket event, and
         # an immediate save per event would hammer .storage (flash wear).
-        if coordinator.last_update_success and runtime_data.last_data:
-            store.async_delay_save(lambda: runtime_data.last_data, 60)
+        # Store.async_delay_save pushes its write time forward on every call,
+        # so a device reporting more often than the delay would postpone the
+        # write indefinitely. Schedule at most one write per window instead;
+        # the data callback returns whatever last_data holds when it fires.
+        nonlocal last_save_scheduled_monotonic
+        if not (coordinator.last_update_success and runtime_data.last_data):
+            return
+        now = time.monotonic()
+        if now - last_save_scheduled_monotonic < STORE_SAVE_DELAY_SECONDS:
+            return
+        last_save_scheduled_monotonic = now
+        store.async_delay_save(
+            lambda: runtime_data.last_data, STORE_SAVE_DELAY_SECONDS
+        )
 
-    hass.async_create_task(
+    entry.async_create_background_task(
+        hass,
         async_init_websocket(
             hass=hass,
             entry=entry,
@@ -641,7 +625,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
             ctx=_ctx,
             json_debug=_json_debug,
             redact_for_debug_logging=_redact_for_debug_logging,
-        )
+        ),
+        "homely websocket init",
     )
     _LOGGER.debug(
         "WebSocket initialization scheduled entry_id=%s location_id=%s",
@@ -705,6 +690,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
             device_count,
         )
     _reenable_integration_disabled_entities(hass, entry)
+    # Register the virtual Homely home device up front so physical devices can
+    # reference it through via_device regardless of platform setup order.
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={location_device_identifier(normalized_location_id)},
+        name=str(data.get("name") or f"Homely location {normalized_location_id}"),
+        manufacturer="Homely",
+        model="Homely",
+        entry_type=DeviceEntryType.SERVICE,
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _schedule_pending_location_imports(hass, entry)
     @callback
@@ -751,8 +746,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: HomelyConfigEntry) -> bo
 async def async_remove_entry(
     hass: HomeAssistant, entry: HomelyConfigEntry
 ) -> None:
-    """Clean up repairs when a config entry is removed."""
+    """Clean up repairs and the cached snapshot when a config entry is removed."""
     async_delete_missing_devices_issue(hass, entry)
+    location_id = entry.data.get(CONF_LOCATION_ID)
+    if location_id is None:
+        return
+    store: Store[dict[str, Any]] = Store(hass, 1, f"homely.{location_id}")
+    try:
+        await store.async_remove()
+    except Exception as err:
+        _LOGGER.debug(
+            "Could not remove cached Homely snapshot entry_id=%s location_id=%s: %s",
+            entry.entry_id,
+            location_id,
+            err,
+        )
 
 
 async def async_remove_config_entry_device(
